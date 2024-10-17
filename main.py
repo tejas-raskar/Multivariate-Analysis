@@ -13,19 +13,18 @@ import matplotlib.pyplot as plt
 import streamlit as st
 
 def fetch_stock_data(ticker, start_date, end_date):
-    yf.pdr_override()
-    df = data.data.get_data_yahoo(ticker, start_date, end_date)
-    df.index = pd.to_datetime(df.index)  # Ensure the index is a datetime object
+    df = yf.download(ticker, start_date, end_date)
     return df
 
 def prepare_data(df):
     df['Returns'] = df['Close'].pct_change()
     df['Volatility'] = df['Returns'].rolling(window=20).std() * np.sqrt(252)
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
+    df['SMA_100'] = df['Close'].rolling(window=100).mean()
     df['SMA_200'] = df['Close'].rolling(window=200).mean()
     
-    features = ['Open', 'High', 'Low', 'SMA_50', 'SMA_200']
-    targets = ['Close', 'Volume', 'Volatility']
+    features = ['Open', 'High', 'Low', 'SMA_50', 'SMA_100','SMA_200']
+    targets = ['Close', 'Volatility']
     
     X = df[features].dropna()
     y = df[targets].loc[X.index]
@@ -40,9 +39,9 @@ def train_models(X, y):
     X_test_scaled = scaler.transform(X_test)
     
     models = {
-        'Random Forest': MultiOutputRegressor(RandomForestRegressor(n_estimators=100)),
+        'Random Forest': MultiOutputRegressor(RandomForestRegressor(n_estimators=200)),
         'SVM': MultiOutputRegressor(SVR()),
-        'Neural Network': MultiOutputRegressor(MLPRegressor(hidden_layer_sizes=(100, 100), max_iter=500))
+        'Neural Network': MultiOutputRegressor(MLPRegressor(hidden_layer_sizes=(100, 100), max_iter=2000))
     }
     
     for name, model in models.items():
@@ -110,18 +109,22 @@ def main():
     
     if st.button('Predict'):
         df = fetch_stock_data(ticker, start_date, end_date)
+        st.subheader("Stock Data")
+        st.write(df)
+
         X, y = prepare_data(df)
         models, scaler, X_test_scaled, y_test = train_models(X, y)
         results = evaluate_models(models, X_test_scaled, y_test)
         
         st.subheader('Model Performance')
+        performance_data = []
         for model_name, result in results.items():
-            st.write(f"\n{model_name}:")
-            for name, m, r in zip(y.columns, result['mse'], result['r2']): 
-                st.write(f'  {name}:')
-                st.write(f'    Mean Squared Error: {m:.4f}')
-                st.write(f'    R-squared Score: {r:.4f}')
+            for name, m, r in zip(y.columns, result['mse'], result['r2']):
+                performance_data.append([model_name, name, m, r])
         
+        performance_df = pd.DataFrame(performance_data, columns=['Model', 'Target', 'Mean Squared Error', 'R-squared Score'])
+        st.table(performance_df)
+
         st.subheader('Actual vs Predicted Values')
         fig1 = plot_results(y_test, results, y.columns)
         st.pyplot(fig1)
